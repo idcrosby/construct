@@ -7,7 +7,6 @@ from threading import Thread
 
 import requests
 
-
 # See KillTaskMessage in include/mesos/v1/scheduler/scheduler.proto
 SUBSCRIBE_BODY = {
     "type": "SUBSCRIBE",
@@ -29,7 +28,6 @@ SUBSCRIBE_BODY = {
 # in all Call messages, apart from the SUBSCRIBE - because we don't have an ID
 # before subscribing (which is why it's defined as `optional`).
 
-
 # See KillTaskMessage in include/mesos/v1/scheduler/scheduler.proto
 TEARDOWN_BODY = {
     "type": "TEARDOWN",
@@ -50,20 +48,14 @@ KILLTASK_BODY = {
     }
 }
 
-
-DOCKER_JSON = "../resources/container.json"
-LAUNCH_JSON = "../resources/launch.json"
-TASK_RESOURCES_JSON = "../resources/task_resources.json"
-
-
 # Adjust the ports according to how you launched Mesos:
 # see --port in the commands in "Prerequisites"
 API_V1 = '/api/v1/scheduler'
 CONTENT = 'application/json'
 
 headers = {
-    "Content-Type": CONTENT, 
-    "Accept": CONTENT, 
+    "Content-Type": CONTENT,
+    "Accept": CONTENT,
     "Connection": "close"
 }
 
@@ -86,7 +78,6 @@ class ApiConnector:
         self.master_url = master_url
         self.API_URL = '{}/{}'.format(master_url, API_V1)
 
-
     def get_offers(self):
         return self.offers
 
@@ -106,50 +97,53 @@ class ApiConnector:
         self.framework_id = framework_id
         if framework_id:
             print("Framework {} registered with Master at ({})".format(framework_id, url))
-                            
+
     def post(self, url, body, **kwargs):
         """ POST `body` to the given `url`.
-        
+
         @return: the Response from the server.
         @rtype: requests.Response
         """
         print('Connecting to Master: ' + url)
         r = requests.post(url, headers=headers, data=json.dumps(body), **kwargs)
-    
+
         if r.status_code not in [200, 202]:
             raise ValueError("Error sending request: {} - {}".format(r.status_code, r.text))
+
         if 'stream' in kwargs:
             # The streaming format needs some munging:
             first_line = True
-            for line in r.iter_lines():
-                if first_line:
-                    count_bytes = int(line)
-                    first_line = False
-                    continue
-                body = json.loads(line[:count_bytes])
-                count_bytes = int(line[count_bytes:])
-                if body.get("type") == "HEARTBEAT":
-                    self.handle_heartbeat(body)
-                if body.get("type") == "ERROR":
-                    self.handle_error(body)
-                # When we get OFFERS we want to see them (and eventually, use them)
-                if body.get("type") == "OFFERS":
-                    self.handle_offers(body)
-                # We need to capture the framework_id to use in subsequent requests.
-                if body.get("type") == "SUBSCRIBED":
-                    self.handle_subscribed(url, body)
-                if self.terminate:
-                    return
+            # Setting chunk size to 1 to avoid missing data
+            for line in r.iter_lines(1):
+                if line: # filter out keep-alive new lines
+                    if first_line:
+                        count_bytes = int(line)
+                        first_line = False
+                        continue
+                    body = json.loads(line[:count_bytes])
+                    count_bytes = int(line[count_bytes:])
+                    if body.get("type") == "HEARTBEAT":
+                        self.handle_heartbeat(body)
+                    if body.get("type") == "ERROR":
+                        self.handle_error(body)
+                    # When we get OFFERS we want to see them (and eventually, use them)
+                    if body.get("type") == "OFFERS":
+                        self.handle_offers(body)
+                    # We need to capture the framework_id to use in subsequent requests.
+                    if body.get("type") == "SUBSCRIBED":
+                        self.handle_subscribed(url, body)
+                    if self.terminate:
+                        return
         return r
 
     def get_framework(self, index=None, id=None):
         """Gets information about the given Framework.
-        
+
         From the `/state.json` endpoint (soon to be deprecated, in favor of `/state`)
         we retrieve the Framework information.
-        
+
         Can only specify one of either `index` or `id`.
-        
+
         @param index: the index in the array of active frameworks
         @param id: the framework ID
         @return: the full `FrameworkInfo` structure
@@ -168,7 +162,6 @@ class ApiConnector:
                     if framework.get("id") == id:
                         return framework
 
-
     def register_framework(self):
         channel = None
         try:
@@ -179,7 +172,7 @@ class ApiConnector:
             print("An error occurred: {}".format(ex))
         return channel
 
-    
+
     def terminate_framework(self, fid=None):
         if not fid:
             framework = self.get_framework(0)
@@ -191,7 +184,7 @@ class ApiConnector:
         body['framework_id']['value'] = fid
         self.post(self.API_URL, body)
 
-        
+
 class ApiConnectorThread(Thread):
     def __init__(self, master_url, connector):
         super(ApiConnectorThread, self).__init__()
@@ -200,26 +193,26 @@ class ApiConnectorThread(Thread):
         self.daemon = True
         self.timeout = 30
 
-        
+
     def run(self):
         """Subscribe to mesos events and handle offers"""
         kwargs = {'stream':True, 'timeout':self.timeout}
         ret = self.connector.post(self.API_URL, SUBSCRIBE_BODY, **kwargs)
         print("Subscribe post request returned: {}".format(ret))
 
-        
+
     def cancel(self):
         print("Stopping connector thread")
         self.connector.terminate = True
         self.framework_id = None
         self.offers = None
-        
+
         # Wait a bit...
         time.sleep(5)
-        print("Channel was closed: {}".format(self.is_alive()))
-
+        print("Channel was closed: {}".format(not self.is_alive()))
 
 def main():
+
     MASTER_URL = 'http://192.168.33.10:5050'
     SLAVE_URL = 'http://192.168.33.11:5051'
 
@@ -242,9 +235,5 @@ def main():
 
     background_thread.join()
 
-
-
 if __name__ == '__main__':
     main()
-
-
